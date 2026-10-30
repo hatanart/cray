@@ -1,0 +1,24 @@
+# RAY ROM set: the chips of one game, for the pyray and cray emulators.
+# The set name is this file's name; the game's NVRAM is saved next to it
+# with the same name (pokeri-8460-1.1.nvram).
+#
+# title: shown by --list-roms and at start
+# Chip lines: address  socket  file  sum
+#   address  where the 64 KB chip sits in the 68000 address space (hex)
+#   sum      16-bit sum of the chip's bytes, as printed in brackets on the
+#            label (hex), or - if the label has none
+
+# The chips as labelled on the main board (PCB 5003):
+#   IC30  "6457-7.7 J"       "5003/IC 30"  "27.09-94 (A8EF)"
+#   IC38  "6458-7.7 J"       "5003/IC 38"  "27.09-94 (14E2)"
+#   IC34  "6458-7.7 J"       "5003/IC 34"  "27.09-94 (01C5)"
+#   IC43  "8460-1.1 J1/100"  "5003/IC43"   "10.10-94"
+# (the IC30 sum is hard to read on the sticker: ABEF or A8EF; the dump sums
+# to A8EF). The bracketed number is the 16-bit sum of the chip's bytes.
+
+title: POKERI (Finnish), game 8460-1.1 (10.10.94), system 6457/6458-7.7 (27.09.94)
+
+00000  IC30  6457-7.7_ic30.bin  A8EF   # system, reset vectors and start-up
+10000  IC38  6458-7.7_ic38.bin  14E2   # system
+20000  IC34  6458-7.7_ic34.bin  01C5   # system, linked 27.09.94
+30000  IC43  8460-1.1_ic43.bin  -      # the game, 10.10.94 (label J1/100, no sum)

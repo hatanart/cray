@@ -1,0 +1,20 @@
+[Unit]
+Description=RAY video poker (cray)
+After=systemd-udev-settle.service sound.target
+# the game owns the screen; no login prompt on the first console
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+WorkingDirectory=/var/lib/cray
+# full CPU speed: a slower clock while ramping up can cost a frame
+ExecStartPre=-/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > $g; done'
+ExecStart=/usr/local/bin/cray kiosk=1
+# SIGTERM: the game gets a mains-failure signal and saves its state first
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

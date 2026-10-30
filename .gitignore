@@ -1,0 +1,12 @@
+# builds
+build/
+/cray
+/cray-sdl
+/raytest
+/elpstest
+
+# The game ROMs belong to RAY (now Veikkaus) and are not part of the
+# repository. roms/*.ray (which chips make up a game, with their sums) stays.
+roms/*.bin
+*.nvram
+*.nvram.tmp
