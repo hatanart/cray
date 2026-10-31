@@ -372,7 +372,11 @@ int ray_tick(float *audio)
     uint32_t ran = run_cycles(CPU_HZ / TICK_HZ);
     int n = 0;
     if (ray.sound && audio) {
-        n = ay_render(&ray.ay, ran, audio);
+        /* Latch 2 bit 3 (lamp bit 19) is VOL, not a lamp: Q13 shorts the
+         * AY mixing point through 1k, leaving 1/4 of the level (-12 dB).
+         * The game turns it off (loud) for the doubling music, "kosh" and
+         * sound 10 (ROM 0x1D12). */
+        n = ay_render(&ray.ay, ran, audio, (ray.ls.lights[2] & 0x08) ? 0.25 : 1.0);
     } else {
         for (int i = 0; i < ray.ay.nev; i++)
             ray.ay.regs[ray.ay.ev[i].reg] = ray.ay.ev[i].val;

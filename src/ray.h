@@ -154,9 +154,9 @@ typedef struct {
 void ay_init(Ay *ay, double clock);
 void ay_reset(Ay *ay);
 void ay_write(Ay *ay, int reg, int val, uint32_t cycle_offset);
-/* Render one tick of frame_cycles CPU cycles; returns samples written.
- * out must hold at least AUDIO_RATE / TICK_HZ + 2 samples. */
-int ay_render(Ay *ay, uint32_t frame_cycles, float *out);
+/* Render one tick of frame_cycles CPU cycles, times gain; returns samples
+ * written. out must hold at least AUDIO_RATE / TICK_HZ + 2 samples. */
+int ay_render(Ay *ay, uint32_t frame_cycles, float *out, double gain);
 
 /* ------------------------------------------------- light & sound */
 typedef struct {

@@ -114,7 +114,7 @@ static void segment(Ay *ay, int n, double *out)
         ay->tone_phase[ch] = ph[ch] - floor(ph[ch]);
 }
 
-int ay_render(Ay *ay, uint32_t frame_cycles, float *outf)
+int ay_render(Ay *ay, uint32_t frame_cycles, float *outf, double gain)
 {
     double exact = (double)frame_cycles * AUDIO_RATE / CPU_HZ + ay->carry;
     int total = (int)exact;
@@ -142,7 +142,7 @@ int ay_render(Ay *ay, uint32_t frame_cycles, float *outf)
         return 0;
     double mean = 0;
     for (int i = 0; i < total; i++) {
-        buf[i] /= 3.0;
+        buf[i] *= gain / 3.0;
         mean += buf[i];
     }
     mean /= total;
