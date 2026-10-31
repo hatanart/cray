@@ -1029,13 +1029,45 @@ static void audio_push(const float *s, int n)
 
 /* Feed the sound card in fixed chunks. The emulator makes 44100 samples
  * per emulated second, the card plays at its own clock, so the backlog
- * drifts; each chunk is stretched or squeezed by up to 0.5 % to keep it
- * near the target instead of dropping sound. */
+ * drifts; each chunk is stretched or squeezed by up to 2 % to keep it
+ * near the target instead of dropping sound. A display mode slowed to
+ * "50 Hz" by a whole-kHz pixel clock can be 1 % off (one was 0.85 %: with
+ * the old 0.5 % limit the backlog reached 1 s every 4.5 minutes and cray
+ * dropped almost a second of sound). */
+/* Sound log (journalctl -u cray): each drop, underrun or dry spell, and
+ * every 10 minutes the backlog range and the stretch, to see the sound
+ * card's clock drifting against the 50 Hz picture. */
+static double alog_t0, alog_next;
+static int alog_min = 1 << 30, alog_max;
+
+static double alog_time(void)
+{
+    double t = now_ms();
+    if (!alog_t0) alog_t0 = t;
+    return (t - alog_t0) / 1000.0;
+}
+
 static void audio_pump(void)
 {
     if (!pcm) { alen = 0; return; }
     enum { CHUNK = 256 };
+    double t = alog_time();
+    if (alen < alog_min) alog_min = alen;
+    if (alen > alog_max) alog_max = alen;
+    if (t >= alog_next) {
+        if (alog_next > 0) {
+            double err = (double)(alen - atarget) / atarget;
+            fprintf(stderr, "audio: %.0f s: backlog %d-%d ms (target %d), stretch %+.3f %%\n",
+                    t, alog_min * 1000 / AUDIO_RATE, alog_max * 1000 / AUDIO_RATE,
+                    atarget * 1000 / AUDIO_RATE, fmax(-2.0, fmin(2.0, err * 2.0)));
+        }
+        alog_next = t + 600;
+        alog_min = 1 << 30;
+        alog_max = 0;
+    }
     if (alen > AUDIO_RATE) {                 /* stalled: start over */
+        fprintf(stderr, "audio: %.0f s: backlog over 1 s, dropped %d ms of sound\n",
+                t, (alen - atarget) * 1000 / AUDIO_RATE);
         ahead = (ahead + alen - atarget) % ABUF;
         alen = atarget;
     }
@@ -1045,6 +1077,8 @@ static void audio_pump(void)
     }
     snd_pcm_sframes_t avail = snd_pcm_avail_update(pcm);
     if (avail < 0) {
+        fprintf(stderr, "audio: %.0f s: sound card underrun (%s), restarting\n",
+                t, snd_strerror((int)avail));
         snd_pcm_recover(pcm, (int)avail, 1);
         aprimed = 0;
         return;
@@ -1052,10 +1086,13 @@ static void audio_pump(void)
     float vol = cfg.volume / 100.0f;
     while (avail >= CHUNK) {
         double err = (double)(alen - atarget) / atarget;
-        double ratio = 1.0 + fmax(-0.005, fmin(0.005, err * 0.005));
+        double ratio = 1.0 + fmax(-0.02, fmin(0.02, err * 0.02));
         int need = (int)(afrac + CHUNK * ratio) + 2;
         if (alen < need) {
-            if (alen < CHUNK / 2) aprimed = 0;    /* ran dry: wait for a backlog again */
+            if (alen < CHUNK / 2) {               /* ran dry: wait for a backlog again */
+                fprintf(stderr, "audio: %.0f s: sound ran dry, waiting for a backlog\n", t);
+                aprimed = 0;
+            }
             break;
         }
         int16_t out[CHUNK];
@@ -1076,6 +1113,8 @@ static void audio_pump(void)
         alen -= used;
         snd_pcm_sframes_t w = snd_pcm_writei(pcm, out, CHUNK);
         if (w < 0) {
+            fprintf(stderr, "audio: %.0f s: write failed (%s), restarting\n",
+                    t, snd_strerror((int)w));
             snd_pcm_recover(pcm, (int)w, 1);
             break;
         }
