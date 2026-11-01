@@ -32,30 +32,76 @@ void session_defaults(SessionOpts *o)
 
 const char *session_title(void) { return title; }
 
-/* write to a temporary file, flush it to the card, then rename over the
- * old one, so a power cut leaves either the old or the new file */
-static int write_nvram(const uint8_t *ram)
+/* Battery RAM files. Three generations are kept: name.nvram (newest),
+ * name.nvram.1 and name.nvram.2. Each is the 64 KB RAM followed by a
+ * trailer "CRAY" + CRC-32 (pyray reads only the first 64 KB). At start the
+ * newest file whose CRC is right is used; a file without the trailer
+ * (made by pyray or an older cray) is taken as it is. */
+#define NV_GENERATIONS 3
+#define NV_TRAILER 8
+
+static uint32_t crc32(const uint8_t *p, size_t n)
 {
-    char tmp[1500];
-    snprintf(tmp, sizeof tmp, "%s.tmp", nvram_path);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
-        return -1;
+    uint32_t c = 0xFFFFFFFFu;
+    while (n--) {
+        c ^= *p++;
+        for (int k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
     }
-    ssize_t n = write(fd, ram, RAM_SIZE);
-    if (n != RAM_SIZE || fsync(fd) != 0) {
-        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
-        close(fd);
-        unlink(tmp);
-        return -1;
+    return ~c;
+}
+
+static void nv_name(char *out, size_t n, int gen)
+{
+    if (gen)
+        snprintf(out, n, "%s.%d", nvram_path, gen);
+    else
+        snprintf(out, n, "%s", nvram_path);
+}
+
+/* 1 = good (ram filled), 0 = missing, -1 = damaged */
+static int read_nv_file(const char *path, uint8_t *ram)
+{
+    static uint8_t buf[RAM_SIZE + NV_TRAILER + 1];
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    size_t n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    if (n == RAM_SIZE) {                        /* no trailer: as it is */
+        memcpy(ram, buf, RAM_SIZE);
+        return 1;
     }
-    close(fd);
-    if (rename(tmp, nvram_path) != 0) {
-        fprintf(stderr, "cannot rename %s: %s\n", tmp, strerror(errno));
+    if (n != RAM_SIZE + NV_TRAILER || memcmp(buf + RAM_SIZE, "CRAY", 4))
         return -1;
+    uint32_t want = (uint32_t)buf[RAM_SIZE + 4] << 24 | buf[RAM_SIZE + 5] << 16 |
+                    buf[RAM_SIZE + 6] << 8 | buf[RAM_SIZE + 7];
+    if (crc32(buf, RAM_SIZE) != want)
+        return -1;
+    memcpy(ram, buf, RAM_SIZE);
+    return 1;
+}
+
+/* the newest good generation; returns 1 if one was found */
+static int load_nvram(uint8_t *ram)
+{
+    char path[1500];
+    for (int g = 0; g < NV_GENERATIONS; g++) {
+        nv_name(path, sizeof path, g);
+        int r = read_nv_file(path, ram);
+        if (r > 0) {
+            if (g)
+                fprintf(stderr, "NVRAM: using the older copy %s\n", path);
+            return 1;
+        }
+        if (r < 0)
+            fprintf(stderr, "NVRAM: %s is damaged, trying an older copy\n", path);
     }
-    /* make the rename itself durable */
+    return 0;
+}
+
+static void sync_dir(void)
+{
     char dir[1400];
     snprintf(dir, sizeof dir, "%s", nvram_path);
     char *slash = strrchr(dir, '/');
@@ -65,6 +111,48 @@ static int write_nvram(const uint8_t *ram)
         fsync(dfd);
         close(dfd);
     }
+}
+
+/* Write to a temporary file and flush it to the card, move the older
+ * generations down one step, then rename the new file into place. A power
+ * cut at any point leaves at least one good generation. */
+static int write_nvram(const uint8_t *ram)
+{
+    static uint8_t buf[RAM_SIZE + NV_TRAILER];
+    memcpy(buf, ram, RAM_SIZE);
+    uint32_t c = crc32(ram, RAM_SIZE);
+    memcpy(buf + RAM_SIZE, "CRAY", 4);
+    buf[RAM_SIZE + 4] = c >> 24;
+    buf[RAM_SIZE + 5] = c >> 16;
+    buf[RAM_SIZE + 6] = c >> 8;
+    buf[RAM_SIZE + 7] = c;
+
+    char tmp[1500];
+    snprintf(tmp, sizeof tmp, "%s.tmp", nvram_path);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
+        return -1;
+    }
+    ssize_t n = write(fd, buf, sizeof buf);
+    if (n != (ssize_t)sizeof buf || fsync(fd) != 0) {
+        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
+        close(fd);
+        unlink(tmp);
+        return -1;
+    }
+    close(fd);
+    char from[1500], to[1500];
+    for (int g = NV_GENERATIONS - 1; g > 0; g--) {
+        nv_name(from, sizeof from, g - 1);
+        nv_name(to, sizeof to, g);
+        rename(from, to);                       /* missing on the first saves: fine */
+    }
+    if (rename(tmp, nvram_path) != 0) {
+        fprintf(stderr, "cannot rename %s: %s\n", tmp, strerror(errno));
+        return -1;
+    }
+    sync_dir();                                 /* make the renames durable */
     return 0;
 }
 
@@ -137,13 +225,7 @@ int session_open(const SessionOpts *o, void (*progress)(int))
     if (o->nvram)
         snprintf(nvram_path, sizeof nvram_path, "%s", o->nvram);
     static uint8_t nv[RAM_SIZE];
-    int have_nvram = 0;
-    FILE *f = fopen(nvram_path, "rb");
-    if (f) {
-        memset(nv, 0, sizeof nv);
-        have_nvram = fread(nv, 1, RAM_SIZE, f) > 0;
-        fclose(f);
-    }
+    int have_nvram = load_nvram(nv);
     fprintf(stderr, "ROM:   %s\nNVRAM: %s%s\n", title, nvram_path, have_nvram ? "" : " (new)");
     ray_init(rom, have_nvram ? nv : NULL, o->ay_clock, o->acrtc_clock);
     ray.sound = 0;

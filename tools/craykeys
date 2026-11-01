@@ -1,0 +1,76 @@
+#!/bin/bash
+# craykeys: play cray from an SSH session. Reads keys in this terminal and
+# sends them to the running game through its control channel, like
+#   echo DOUBLE | sudo tee /run/cray/control
+#
+#   tools/craykeys            (asks for the sudo password once)
+#
+# Keys are the same as on the Pi's own keyboard, q quits this tool.
+
+FIFO=${CRAY_CONTROL:-/run/cray/control}
+
+if [ ! -p "$FIFO" ]; then
+    echo "$FIFO not found: is cray running? (sudo systemctl status cray)" >&2
+    exit 1
+fi
+if [ ! -w "$FIFO" ]; then
+    exec sudo CRAY_CONTROL="$FIFO" "$0" "$@"
+fi
+
+exec 3>"$FIFO" || exit 1
+trap '' PIPE
+
+cat <<'EOF'
+  1-5 hold      Enter/Space deal   b bet       p collect   d double
+  Left small    Right big          i coin      s service   F1-F6 service keys
+  F7 scanlines  F9/r refill        F10/o door  q quit this tool
+EOF
+
+saved=$(stty -g)
+trap 'stty "$saved"; echo' EXIT
+stty -echo -icanon min 1 time 0
+
+send() {
+    if ! echo "$1" >&3 2>/dev/null; then
+        echo "cray stopped listening" >&2
+        exit 1
+    fi
+    printf '\r%-12s' "$1"
+}
+
+while IFS= read -r -s -n1 k; do
+    if [ "$k" = $'\e' ]; then
+        # escape sequence: arrow or function key (a lone Esc is ignored)
+        seq=
+        while IFS= read -r -s -n1 -t 0.05 c; do
+            seq+=$c
+            [[ $seq != O && $seq != '[' && $c == [A-Za-z~] ]] && break
+        done
+        case $seq in
+            '[D') send SMALL ;;
+            '[C') send BIG ;;
+            OP|'[11~') send SRVC1 ;;
+            OQ|'[12~') send SRVC2 ;;
+            OR|'[13~') send K13 ;;
+            OS|'[14~') send K14 ;;
+            '[15~') send K15 ;;
+            '[17~') send K16 ;;
+            '[18~') send SCANLINES ;;
+            '[20~') send REFILL ;;
+            '[21~') send DOOR ;;
+        esac
+        continue
+    fi
+    case $k in
+        [1-5]) send "HOLD$k" ;;
+        ''|' ') send DEAL ;;            # Enter reads as an empty key
+        b|B) send BET ;;
+        p|P) send COLLECT ;;
+        d|D) send DOUBLE ;;
+        i|I) send COIN ;;
+        s|S) send SERVICE ;;
+        r|R) send REFILL ;;
+        o|O) send DOOR ;;
+        q|Q) exit 0 ;;
+    esac
+done

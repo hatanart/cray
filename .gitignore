@@ -10,3 +10,4 @@ build/
 roms/*.bin
 *.nvram
 *.nvram.tmp
+*.nvram.[12]

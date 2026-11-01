@@ -2,11 +2,13 @@
 # Turn a fresh Raspberry Pi OS Lite (Bookworm or later) into a RAY machine.
 # Run on the Pi, from the cray folder, as root:
 #
-#   sudo image/setup.sh [--hdmi | --hdmi-576p | --composite | --composite-576i]
+#   sudo image/setup.sh [--hdmi | --hdmi-576p | --hdmi-1216 | --composite | --composite-576i]
 #                       [--audio jack|hdmi] [--readonly]
 #
 #   --hdmi            picture on HDMI at the screen's own size, 50 Hz (default)
 #   --hdmi-576p       HDMI 720x576p50 (4:3), like an Ultimate 64
+#   --hdmi-1216       HDMI 1216x576@50: 576p timing with 1216 pixels a line,
+#                     the game doubled both ways with no side borders
 #   --composite       the 3.5 mm jack's video ring, PAL progressive 288p
 #                     (one game line per TV line, like an old console);
 #                     tries 292 lines so nothing is cropped, else 288
@@ -33,6 +35,7 @@ for a in "$@"; do
     case "$a" in
         --hdmi) VIDEO=hdmi ;;
         --hdmi-576p) VIDEO=hdmi576p ;;
+        --hdmi-1216) VIDEO=hdmi1216 ;;
         --composite) VIDEO=composite ;;
         --composite-576i) VIDEO=composite576i ;;
         --audio) ;;
@@ -127,6 +130,11 @@ case $VIDEO in
         set_conf connector HDMI-A-1
         set_conf mode 720x576@50
         ;;
+    hdmi1216)
+        echo "dtoverlay=vc4-kms-v3d" >> $CONFIG
+        set_conf connector HDMI-A-1
+        set_conf mode 1216x576@50
+        ;;
     *)
         echo "dtoverlay=vc4-kms-v3d" >> $CONFIG
         ;;
@@ -162,6 +170,21 @@ if [ $VIDEO = composite ] || [ $VIDEO = composite576i ]; then
     add_cmd video=Composite-1:720x576@50ie
 fi
 
+echo "== logs in RAM"
+# The system log is kept in memory only (lost at a reboot), so logging
+# never writes to the SD card. journalctl -u cray still works.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/cray.conf <<'EOF2'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=16M
+EOF2
+systemctl restart systemd-journald
+# older systems also copy everything to /var/log/syslog
+if systemctl list-unit-files rsyslog.service >/dev/null 2>&1; then
+    systemctl disable --now rsyslog.service 2>/dev/null || true
+fi
+
 echo "== service"
 install -m 644 image/cray.service /etc/systemd/system/cray.service
 systemctl daemon-reload
@@ -175,6 +198,9 @@ if [ $READONLY = 1 ]; then
     NAME=$(basename "${SET:-pokeri-8460-1.1.ray}" .ray)
     set_conf nvram $BOOT/cray/$NAME.nvram
     raspi-config nonint do_overlayfs 0
+    # raspi-config may also write-protect the boot partition, but the
+    # battery RAM is saved there: keep it writable
+    sed -i -E '/[[:space:]]\/boot(\/firmware)?[[:space:]]/ s/,ro([,[:space:]])/\1/' /etc/fstab
     echo "The root file system becomes read-only after the reboot."
     echo "To change settings later: sudo raspi-config (Performance > Overlay file system), off, reboot."
 fi

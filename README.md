@@ -76,6 +76,7 @@ reboot; it undoes the previous choice. The build needs a few minutes on
 |---|---|---|
 | `--hdmi` (default) | the screen's own resolution at 50 Hz | HDMI |
 | `--hdmi-576p` | 720x576p50, 4:3, like an Ultimate 64 | HDMI |
+| `--hdmi-1216` | 1216x576@50: 576p timing, game doubled both ways, no side borders | HDMI |
 | `--composite` | PAL 288p (292 lines), one game line per TV line | composite |
 | `--composite-576i` | PAL 576i, interlaced | composite |
 
@@ -151,15 +152,37 @@ Switching the Pi off at the wall can still damage the SD card's file
 system, mostly while something is writing. cray writes only the 64 KB
 battery RAM file: 10 seconds after coins go in or out (at most once a
 minute), once an hour otherwise, and at exit. It writes a new file,
-flushes it to the card and renames it over the old one, so a power cut
-leaves either the old file or the new one. The write runs in a
-background thread, so it never delays a frame.
+flushes it to the card and renames it into place. Like the game's own
+books, which it keeps in three copies inside the RAM, cray keeps three
+generations of the file: `pokeri-8460-1.1.nvram` (newest), `.nvram.1`
+and `.nvram.2`, each ending in a checksum. At start it takes the newest
+one whose checksum is right and logs it if it had to fall back to an
+older one. The write runs in a background thread, so it never delays a
+frame. (pyray reads the same files: it ignores the checksum at the end.)
 
-With `--readonly`, the system itself runs from a read-only overlay
-(Raspberry Pi OS's own "overlay file system"), so nothing but that one
-file is ever written. The file is then kept on the boot partition. A
-power cut can lose at most the last minute of bookkeeping. To change
-settings later, turn the overlay off in `raspi-config`, then reboot.
+Setup also keeps the system log in RAM only (lost at a reboot), so
+logging never writes to the card. `journalctl -u cray` still shows the
+game's messages since the last start.
+
+**Read-only system.** Add `--readonly` to the setup options:
+
+    sudo image/setup.sh --hdmi-1216 --audio jack --readonly
+    sudo reboot
+
+The system then runs from a read-only overlay (Raspberry Pi OS's own
+"overlay file system"): every write, including logs and anything you
+change, goes to RAM and is gone after a reboot. The only file written to
+the card is the battery RAM, kept on the boot partition
+(`/boot/cray/` or `/boot/firmware/cray/`). A power cut can lose at most
+the last minute of bookkeeping.
+
+To change settings or update cray later, turn the overlay off first:
+
+    sudo raspi-config nonint do_overlayfs 1     # or: raspi-config > Performance > Overlay, off
+    sudo reboot
+    # edit /etc/cray/cray.conf, git pull, make && sudo make install ...
+    sudo image/setup.sh <your options> --readonly
+    sudo reboot
 
 ### Display
 
@@ -231,6 +254,11 @@ for example from an SSH session, with no keyboard on the Pi:
 
 Settings changed this way last until the game restarts; put them in
 `cray.conf` to keep them.
+
+To play from the SSH session with the same keys as on the Pi's keyboard
+(1-5, Enter, B, P, D, arrows, I, F1-F10; q quits):
+
+    tools/craykeys
 
 ### Coin events
 
