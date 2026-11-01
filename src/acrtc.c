@@ -929,6 +929,8 @@ static int seen_test(int x, int y, int add)
     return 0;
 }
 
+static long paint_runs;      /* horizontal runs the last PAINT filled, for the timing */
+
 static void paint(Acrtc *a, int sx, int sy, unsigned col)
 {
     int bs = bpp_shift(a);
@@ -945,6 +947,7 @@ static void paint(Acrtc *a, int sx, int sy, unsigned col)
     }
     size_t sp = 0;
     int n = 0;
+    paint_runs = 0;
     pstack[sp++] = (Pt){ sx, sy };
     static const int nb[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
     while (sp && n < 200000) {
@@ -952,6 +955,7 @@ static void paint(Acrtc *a, int sx, int sy, unsigned col)
         if (seen_test(p.x, p.y, 1))
             continue;
         n++;
+        paint_runs += 1 - seen_test(p.x - 1, p.y, 0) - seen_test(p.x + 1, p.y, 0);
         dot(a, p.x, p.y, 0, col);
         for (int i = 0; i < 4; i++) {
             int nx = p.x + nb[i][0], ny = p.y + nb[i][1];
@@ -1101,15 +1105,27 @@ static long cost(const Acrtc *a, const uint16_t *f, int n, long dots)
     int op = f[0];
     int P = (op & 4) ? 6 : 4;
     int top = op >> 12;
-    if (top < 4) {
+    if (top < 2) {                                      /* register access */
+        if ((op & 0xFC00) == 0x0800 || (op & 0xFC00) == 0x0C00)
+            return 6;                                   /* WPR / RPR */
         if ((op & 0xFFF0) == 0x1800)
             return 4L * f[1] + 8;                       /* WPTN */
-        return 8;
+        if ((op & 0xFFF0) == 0x1C00)
+            return 4L * f[1] + 10;                      /* RPTN */
+        return 8;                                       /* ORG */
     }
     if (top < 8) {
-        if (op == 0x4400 || op == 0x4800 || (op & 0xFFFC) == 0x4C00)
-            return 12;
+        if (op == 0x4400)
+            return 12;                                  /* RD */
+        if (op == 0x4800 || (op & 0xFFFC) == 0x4C00)
+            return 8;                                   /* WT / MOD */
         long x = iabs(s16(f[n - 2])) + 1, y = iabs(s16(f[n - 1])) + 1;
+        if (top < 4) {                                  /* DMA: [x*y/8] rounded up */
+            long w = (x * y + 7) / 8;
+            if (op == 0x2400)
+                return (4 * x + 8) * y + 12 * w + 65;   /* DRD (62..68) */
+            return (4 * x + 8) * y + 16 * w + 34;       /* DWT / DMOD */
+        }
         if (op == 0x5800)
             return (2 * x + 8) * y + 12;                /* CLR */
         if ((op & 0xFFFC) == 0x5C00)
@@ -1118,14 +1134,22 @@ static long cost(const Acrtc *a, const uint16_t *f, int n, long dots)
     }
     if ((op & 0xF800) == 0x8000)
         return 56;
-    if ((op & 0xF800) == 0x8800 || (op & 0xF800) == 0x9000)
-        return P * dots + 54;
-    if ((op & 0xF000) == 0x9000 || (op & 0xF800) == 0xA000)
-        return P * dots + 16L * f[1] + 20;
-    if ((op & 0xFE00) == 0xA800 || (op & 0xFE00) == 0xB000 || (op & 0xFE00) == 0xB400)
-        return 8 * dots + 66;
-    if ((op & 0xF800) == 0xA800 || (op & 0xF800) == 0xB800)
-        return 10 * dots + 96;
+    if ((op & 0xF800) == 0x8800)
+        return P * dots + 18;                           /* ALINE / RLINE */
+    if ((op & 0xF800) == 0x9000)
+        return P * dots + 54;                           /* ARCT / RRCT: 2P(A+B)+54 */
+    if ((op & 0xF800) == 0x9800)
+        return P * dots + 16L * f[1] + 8;               /* APLL / RPLL */
+    if ((op & 0xF800) == 0xA000)
+        return P * dots + 16L * f[1] + 20;              /* APLG / RPLG */
+    if ((op & 0xFE00) == 0xA800)
+        return 8 * dots + 66;                           /* CRCL */
+    if ((op & 0xFE00) == 0xAC00)
+        return 10 * dots + 90;                          /* ELPS */
+    if ((op & 0xFE00) == 0xB000 || (op & 0xFE00) == 0xB400)
+        return 8 * dots + 18;                           /* AARC / RARC */
+    if ((op & 0xF800) == 0xB800)
+        return 10 * dots + 96;                          /* AEARC / REARC */
     if ((op & 0xFFF0) == 0xC000 || (op & 0xFFF0) == 0xC400) {
         long ra, rb;
         if ((op & 0xFFF8) == 0xC400) {
@@ -1138,7 +1162,10 @@ static long cost(const Acrtc *a, const uint16_t *f, int n, long dots)
         return (P * ra + 8) * rb + 18;
     }
     if ((op & 0xFE00) == 0xC800)
-        return 20 * dots + 100;
+        /* PAINT: the manual gives (18A+102)B-58 for a rectangle (A wide, B
+         * rows): 18 per pixel and 102 per row. Taken here per run of pixels
+         * in a row, which is the same for a rectangle. */
+        return 18 * dots + 102 * paint_runs - 58;
     if ((op & 0xFFF8) == 0xCC00)
         return 8;
     if ((op & 0xF000) == 0xD000)
