@@ -102,7 +102,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < 1700; i++)
             ray_tick(NULL);
         fprintf(stderr, "float: added %d\n", ray_ensure_float(1000));
-        ray_set_default_features(FEATURE_WIN_MUSIC | FEATURE_SAVER_OFF);
+        ray_set_default_features(FEATURE_WIN_MUSIC);
         ray_power_cycle();
     }
     ray.sound = 1;

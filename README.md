@@ -126,8 +126,8 @@ The resistor and the 10 nF capacitor filter out the switching (about
 16 kHz cut-off); the 10 µF capacitor blocks the DC. Use a small amplifier
 board (PAM8403 or similar) with a speaker, or powered PC speakers; one
 channel is enough. Never connect a speaker straight to a pin. Setup moves
-the two lamp lines that used GPIO 18 and 19 (lamp 5, never lit, to
-GPIO 3; lamp 12, always on, to GPIO 14).
+the two lamp lines that used GPIO 18 and 19 (lamp 5, the big-win lamp, to
+GPIO 3; lamp 12, probably PUDOTA 1 MK, to GPIO 14).
 
 On the first start, like pyray, cray puts 1000 coins in the payout
 float and turns on win music in TESTI 14 (a tune for wins of 50 or
