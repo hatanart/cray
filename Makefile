@@ -61,6 +61,7 @@ elpstest: tools/elpstest.c src/ray.h $(CORE:%=$(TBUILD)/%.o) $(CPU_O)
 
 install: cray
 	install -D -m 755 cray $(DESTDIR)/usr/local/bin/cray
+	install -D -m 644 -t $(DESTDIR)/usr/local/share/cray sounds/*.wav
 
 clean:
 	rm -rf build cray cray-sdl raytest elpstest

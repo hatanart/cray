@@ -68,7 +68,8 @@ static struct {
     int bright_attract;
     int realtime;
     char event_script[512];
-    char sound_payout[512], sound_coin_in[512];
+    char sound_payout[1024], sound_coin_in[1024];
+    double sound_vary;
     uint32_t features;
     int scanlines;                      /* % darker for the last screen line of each game line */
     char scale[16];                     /* "auto" or "WxH", e.g. "2x3" */
@@ -151,7 +152,10 @@ static void config_defaults(void)
     cfg.acrtc_clock = 3000000;
     cfg.custom50 = 1;
     cfg.bright_attract = 1;
+    cfg.sound_vary = 5;
     strcpy(cfg.event_script, "/etc/cray/event.sh");
+    strcpy(cfg.sound_payout, "/usr/local/share/cray/payout_coin_01.wav /usr/local/share/cray/payout_coin_02.wav");
+    strcpy(cfg.sound_coin_in, "/usr/local/share/cray/coin-in.wav");
     strcpy(cfg.romdir, "/var/lib/cray/roms");
     cfg.realtime = 1;
     bind(BTN_HOLD1, "1"); bind(BTN_HOLD2, "2"); bind(BTN_HOLD3, "3");
@@ -185,6 +189,7 @@ static int config_set(const char *k, const char *v)
 #undef INT
     if (!strcasecmp(k, "features")) { cfg.features = strtoul(v, NULL, 16); return 0; }
     if (!strcasecmp(k, "sound.payout")) { snprintf(cfg.sound_payout, sizeof cfg.sound_payout, "%s", v); return 0; }
+    if (!strcasecmp(k, "sound.vary")) { cfg.sound_vary = atof(v); return 0; }
     if (!strcasecmp(k, "sound.coin-in")) { snprintf(cfg.sound_coin_in, sizeof cfg.sound_coin_in, "%s", v); return 0; }
     if (!strncasecmp(k, "lamp", 4) && isdigit((unsigned char)k[4])) {
         int bit = atoi(k + 4);
@@ -940,9 +945,12 @@ static int audio_open(void)
 
 /* ---- event sounds: WAV files mixed into the game's sound */
 typedef struct { float *s; int n; } Clip;
-static Clip clip_payout, clip_coin_in;
+/* one or more WAV files for an event; each play picks one at random */
+#define SET_MAX 8
+typedef struct { Clip c[SET_MAX]; int n; } ClipSet;
+static ClipSet clip_payout, clip_coin_in;
 #define VOICES 8
-static struct { const Clip *c; int pos; } voice[VOICES];
+static struct { const Clip *c; double pos, step; } voice[VOICES];
 
 static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint16_t le16(const uint8_t *p) { return p[0] | p[1] << 8; }
@@ -950,7 +958,7 @@ static uint16_t le16(const uint8_t *p) { return p[0] | p[1] << 8; }
 /* 8/16-bit PCM WAV, any rate and channel count -> mono 44100 Hz floats */
 static int load_wav(const char *path, Clip *c)
 {
-    if (!path[0]) return -1;
+    if (!path[0] || !strcasecmp(path, "none")) return -1;
     FILE *f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "sound: cannot open %s\n", path); return -1; }
     fseek(f, 0, SEEK_END);
@@ -1003,11 +1011,39 @@ bad:
     return -1;
 }
 
-static void play_clip(const Clip *c)
+/* the files in a space-separated list */
+static void load_set(const char *list, ClipSet *set)
 {
+    char buf[sizeof cfg.sound_payout];
+    snprintf(buf, sizeof buf, "%s", list);
+    for (char *p = strtok(buf, " \t"); p && set->n < SET_MAX; p = strtok(NULL, " \t"))
+        if (!load_wav(p, &set->c[set->n])) set->n++;
+}
+
+/* 0..1, for sound effects only (the game has its own randomness) */
+static double sfx_random(void)
+{
+    static uint32_t seed;
+    if (!seed) seed = (uint32_t)time(NULL) | 1;
+    seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+    return (seed >> 8) / (double)(1 << 24);
+}
+
+static void play_set(const ClipSet *set)
+{
+    if (!set->n) return;
+    const Clip *c = &set->c[(int)(sfx_random() * set->n)];
     if (!c->n) return;
+    /* each copy plays a little faster or slower (higher or lower), up to
+     * sound.vary %, so a run of coins doesn't sound like one sample */
+    double r = sfx_random() * 2 - 1;                        /* -1..1 */
     for (int i = 0; i < VOICES; i++)
-        if (!voice[i].c) { voice[i].c = c; voice[i].pos = 0; return; }
+        if (!voice[i].c) {
+            voice[i].c = c;
+            voice[i].pos = 0;
+            voice[i].step = 1 + r * cfg.sound_vary / 100.0;
+            return;
+        }
 }
 
 static void audio_push(const float *s, int n)
@@ -1017,9 +1053,14 @@ static void audio_push(const float *s, int n)
     memcpy(mixed, s, n * sizeof(float));
     for (int v = 0; v < VOICES; v++) {
         if (!voice[v].c) continue;
-        for (int i = 0; i < n && voice[v].pos < voice[v].c->n; i++)
-            mixed[i] += voice[v].c->s[voice[v].pos++];
-        if (voice[v].pos >= voice[v].c->n) voice[v].c = NULL;
+        const Clip *c = voice[v].c;
+        for (int i = 0; i < n && voice[v].pos < c->n - 1; i++) {
+            int k = (int)voice[v].pos;
+            float f = (float)(voice[v].pos - k);
+            mixed[i] += c->s[k] + (c->s[k + 1] - c->s[k]) * f;
+            voice[v].pos += voice[v].step;
+        }
+        if (voice[v].pos >= c->n - 1) voice[v].c = NULL;
     }
     s = mixed;
     for (int i = 0; i < n; i++) {
@@ -1202,8 +1243,8 @@ extern char **environ;
  * it. It runs at normal priority, so it can't delay a frame. */
 static void on_event(const char *name)
 {
-    if (!strcmp(name, "payout")) play_clip(&clip_payout);
-    if (!strcmp(name, "coin-in")) play_clip(&clip_coin_in);
+    if (!strcmp(name, "payout")) play_set(&clip_payout);
+    if (!strcmp(name, "coin-in")) play_set(&clip_coin_in);
     if (!cfg.event_script[0] || access(cfg.event_script, X_OK) != 0)
         return;
     posix_spawnattr_t at;
@@ -1293,8 +1334,8 @@ int main(int argc, char **argv)
     audio_open();
     o.sound = pcm != NULL;
     if (pcm) {
-        load_wav(cfg.sound_payout, &clip_payout);
-        load_wav(cfg.sound_coin_in, &clip_coin_in);
+        load_set(cfg.sound_payout, &clip_payout);
+        load_set(cfg.sound_coin_in, &clip_coin_in);
     }
     lamps_open();
     input_scan();

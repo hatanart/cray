@@ -270,11 +270,24 @@ To play from the SSH session with the same keys as on the Pi's keyboard
 ### Coin events
 
 For each coin the hopper drops into the tray, cray plays
-`sound.payout` (a WAV file mixed into the game sound), if set, and runs
+`sound.payout` (a WAV file mixed into the game sound) and runs
 `/etc/cray/event.sh payout`. Coins put in give `coin-in`. The script
 runs in the background at normal priority and does nothing yet.
 Use the WAV setting for sounds: a second program often can't open the
 sound card while the game is playing.
+
+cray comes with a payout and a coin-in sound (`sounds/`, installed to
+`/usr/local/share/cray`; adapted from original recordings by
+kyles and Mrguff on Freesound.org, CC0). `sound.payout` has two coin sounds:
+it takes a list of files separated by spaces and plays one of them at
+random for each coin. Set either setting to `none` to turn it off, or to
+your own files. The WAV files are 8- or 16-bit PCM, best mono at 44100 Hz, and the
+payout sound under 0.3 s (the hopper pays a coin every 0.3 s; longer
+sounds overlap, up to 8 at once). Each play is randomly up to
+`sound.vary` % (default 5) faster or slower, so a payout doesn't sound
+like one sample repeated. To convert a file:
+
+    ffmpeg -i coin.mp3 -ac 1 -ar 44100 -c:a pcm_s16le -t 0.3 coin.wav
 
 ## On a PC
 
