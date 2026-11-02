@@ -236,6 +236,7 @@ void ray_fault_codes(char *out, int n);   /* "01 92 " ... */
 /* video: index image (one byte per pixel, 0..15) and its palette (0xRRGGBB) */
 void video_render(const Acrtc *a, uint8_t *img /* SCREEN_W * SCREEN_H */);
 void video_palette(uint16_t dcr, uint32_t pal[16]);
+void video_palette_ex(uint16_t dcr, int bright, uint32_t pal[16]);
 
 /* rom sets */
 int rom_load(const char *arg, const char *romdir, uint8_t *rom,

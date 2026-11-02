@@ -19,6 +19,16 @@ static const uint8_t PALETTE[16][3] = {
 
 void video_palette(uint16_t dcr, uint32_t pal[16])
 {
+    video_palette_ex(dcr, 0, pal);
+}
+
+/* bright = 1: when the game dims all three colours (the last step of the
+ * attract-mode saver, made to spare a CRT), take out the part they have
+ * in common, so the screen stays as bright as in play and keeps only the
+ * tint (light blue). A step that leaves a colour undimmed (the yellow
+ * tint before it) doesn't change. */
+void video_palette_ex(uint16_t dcr, int bright, uint32_t pal[16])
+{
     int attr = (dcr & 0x3F) ^ 0xFF;
     int dim[3] = { 1, 1, 1 };
     if (attr & 0x01) dim[0] += 2;
@@ -27,8 +37,14 @@ void video_palette(uint16_t dcr, uint32_t pal[16])
     if (attr & 0x08) dim[0] += 3;
     if (attr & 0x10) dim[1] += 3;
     if (attr & 0x20) dim[2] += 3;
+    int common = 1;
+    if (bright) {
+        common = dim[0] < dim[1] ? dim[0] : dim[1];
+        if (dim[2] < common) common = dim[2];
+    }
     for (int i = 0; i < 16; i++) {
-        uint32_t r = PALETTE[i][0] / dim[0], g = PALETTE[i][1] / dim[1], b = PALETTE[i][2] / dim[2];
+        uint32_t r = PALETTE[i][0] * common / dim[0], g = PALETTE[i][1] * common / dim[1],
+                 b = PALETTE[i][2] * common / dim[2];
         pal[i] = (r << 16) | (g << 8) | b;
     }
 }

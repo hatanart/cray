@@ -130,11 +130,18 @@ the two lamp lines that used GPIO 18 and 19 (lamp 5, never lit, to
 GPIO 3; lamp 12, always on, to GPIO 14).
 
 On the first start, like pyray, cray puts 1000 coins in the payout
-float and turns on two game settings from TESTI 14: win music (a tune
-for wins of 50 or more) and saver off (the attract screen isn't
-dimmed). See `features` in `cray.conf`. A battery RAM file made before
-this gets the same settings at the next start (the game restarts once,
+float and turns on win music in TESTI 14 (a tune for wins of 50 or
+more). See `features` in `cray.conf`. A battery RAM file made before
+this gets the same setting at the next start (the game restarts once,
 about 15 seconds after it comes up).
+
+The game's attract-mode saver is on: after a while the screen turns
+yellow, then dark blue. On the Pi the dark step is kept as bright as
+play, only light blue (`bright_attract = 1`; 0 = dark as on the
+machine, or set bit 29 in `features` / TESTI 14 for no saver at all).
+TESTI 14 settings live in the battery RAM, so a save made with the old
+default (20002000) keeps the saver off: change it in TESTI 14 and
+restart, or delete the save (all three copies, see below).
 
 The game then starts at boot, runs as a service and restarts if it
 stops. Settings are in `/etc/cray/cray.conf`, and the ROMs and battery

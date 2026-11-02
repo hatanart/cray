@@ -24,7 +24,7 @@ void session_defaults(SessionOpts *o)
     o->float_coins = 1000;
     o->save_every = 3600;
     o->auto_refill = 1;
-    o->features = FEATURE_WIN_MUSIC | FEATURE_SAVER_OFF;
+    o->features = FEATURE_WIN_MUSIC;
     o->ay_clock = 1000000;
     o->acrtc_clock = 3000000;
     o->sound = 1;
