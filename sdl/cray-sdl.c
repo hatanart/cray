@@ -44,15 +44,16 @@ int main(int argc, char **argv)
     SessionOpts o;
     session_defaults(&o);
     int scale = 2, opt;
-    while ((opt = getopt(argc, argv, "r:R:n:s:q")) != -1) {
+    while ((opt = getopt(argc, argv, "r:R:n:s:qb:")) != -1) {
         switch (opt) {
         case 'r': o.romdir = optarg; break;
         case 'R': o.rom = optarg; break;
         case 'n': o.nvram = optarg; break;
         case 's': scale = atoi(optarg) > 0 ? atoi(optarg) : 2; break;
         case 'q': o.sound = 0; break;
+        case 'b': o.board = atoi(optarg); break;
         default:
-            fprintf(stderr, "usage: cray-sdl [-r romdir] [-R rom] [-n nvram] [-s scale] [-q]\n");
+            fprintf(stderr, "usage: cray-sdl [-r romdir] [-R rom] [-n nvram] [-s scale] [-q] [-b 5501|5502]\n");
             return 2;
         }
     }
@@ -113,7 +114,7 @@ int main(int argc, char **argv)
         }
         uint32_t pal[16];
         video_render(&ray.acrtc, img);
-        video_palette(acrtc_reg(&ray.acrtc, 0x06), pal);
+        ray_palette(0, pal);
         for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
             px[i] = 0xFF000000u | pal[img[i]];
         SDL_UpdateTexture(tex, NULL, px, SCREEN_W * 4);

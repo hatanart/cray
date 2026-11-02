@@ -15,7 +15,7 @@
 #endif
 #include "ray.h"
 
-#define ADDR_MASK (VRAM_WORDS - 1)
+#define ADDR_MASK (a->addr_mask)
 
 static const int8_t INSTR_LEN[64] = {
     0, 3, 2, 1, 0, 0, -1, 2,

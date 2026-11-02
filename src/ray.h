@@ -101,13 +101,15 @@ void coin_tick_100hz(Coin *c);
 void coin_insert(Coin *c, int channel);
 
 /* --------------------------------------------------------- HD63484 */
-#define VRAM_WORDS 0x80000
+#define VRAM_WORDS 0x100000        /* room for the 5502 board; the 5501 has half */
+#define VRAM_WORDS_5501 0x80000
 #define ACRTC_FIFO_MAX 0x20010
 #define ACRTC_PENDING 0x10000
 #define ACRTC_READFIFO 0x10000
 
 typedef struct {
     uint16_t vram[VRAM_WORDS];
+    uint32_t addr_mask;     /* video memory size - 1 (5501: 512K words, 5502: 1M) */
     uint16_t regs[128];
     int ch, reg8cnt;
     uint16_t r8latch;
@@ -167,6 +169,19 @@ typedef struct {
     uint8_t ay_regs[16];
 } LightSound;
 
+/* ------------------------------------------------ video board 5502 */
+/* The later video board ("Videomonitorin ohjain II", PIK-5502-0): 1M words
+ * of video memory, an MC68681 DUART at 0C0000 (only what the start-up test
+ * needs), 32 KB static RAM at 0D0000 and an IMS G176 palette DAC at 0E0000.
+ * See pyray/board5502.py. */
+typedef struct {
+    uint8_t pal[256][3];    /* 6 bits per gun */
+    uint8_t mask, waddr, raddr, wstep, rstep;
+    uint32_t version;       /* bumped on every palette or mask change */
+    uint8_t ivr;            /* DUART interrupt vector register */
+    uint8_t sram[0x8000];
+} Board5502;
+
 /* ---------------------------------------------------------- machine */
 typedef struct {
     uint8_t rom[ROM_SIZE];
@@ -189,12 +204,20 @@ typedef struct {
     int hopper_synced;
     int resets;
     int sound;              /* render audio in run_tick */
+    int board;              /* video board: 5501 or 5502 */
+    Board5502 b5502;
 } Ray;
 
 extern Ray ray;
 
 /* Power on with this ROM image and battery RAM image (NULL = blank). */
 void ray_init(const uint8_t *rom, const uint8_t *nvram, double ay_clock, double acrtc_clock);
+/* Video board 5501 (the default) or 5502; call right after ray_init. */
+int ray_set_board(int board);
+/* The 16 colours the screen shows now (0xRRGGBB): on the 5501 the fixed
+ * colours with the DCR dimming (bright: see video_palette_ex), on the 5502
+ * the game's G176 palette through its pixel mask. */
+void ray_palette(int bright, uint32_t pal[16]);
 /* One 100 Hz tick. If ray.sound, writes the tick's samples to audio and
  * returns how many; else returns 0. */
 int ray_tick(float *audio);

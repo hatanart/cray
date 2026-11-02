@@ -15,6 +15,7 @@ typedef struct {
     uint32_t features;          /* game features to set while the books hold 0 (0 = leave) */
     double ay_clock, acrtc_clock;
     int sound;
+    int board;                  /* video board 5501 (default) or 5502 */
 } SessionOpts;
 
 void session_defaults(SessionOpts *o);

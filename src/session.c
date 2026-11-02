@@ -27,6 +27,7 @@ void session_defaults(SessionOpts *o)
     o->features = FEATURE_WIN_MUSIC;
     o->ay_clock = 1000000;
     o->acrtc_clock = 3000000;
+    o->board = 5501;
     o->sound = 1;
 }
 
@@ -228,6 +229,12 @@ int session_open(const SessionOpts *o, void (*progress)(int))
     int have_nvram = load_nvram(nv);
     fprintf(stderr, "ROM:   %s\nNVRAM: %s%s\n", title, nvram_path, have_nvram ? "" : " (new)");
     ray_init(rom, have_nvram ? nv : NULL, o->ay_clock, o->acrtc_clock);
+    if (ray_set_board(o->board)) {
+        fprintf(stderr, "board %d: must be 5501 or 5502\n", o->board);
+        return -1;
+    }
+    if (o->board != 5501)
+        fprintf(stderr, "video board %d\n", o->board);
     ray.sound = 0;
     if (!have_nvram) {
         /* No battery RAM yet: let the game set up its books, put the payout

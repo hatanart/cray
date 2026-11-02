@@ -102,6 +102,7 @@ static void reset_peripherals(void)
     ls_reset(&ray.ls);
     for (int i = 0; i < 5; i++)
         acia_reset(&ray.acia[i]);
+    ray.b5502.ivr = 0x0F;               /* DUART interrupt vector after reset */
 }
 
 static void kick_watchdog(void)
@@ -152,8 +153,71 @@ static void set_default_inputs(void)
 }
 
 /* ------------------------------------------------------------ I/O */
+/* Video board 5502 (see ray.h): DUART 0C0000-0C000F, static RAM
+ * 0D0000-0DFFFF (32 KB, repeated), G176 palette DAC 0E0000-0E0007. */
+static int b5502_read(uint32_t addr, uint8_t *v)
+{
+    Board5502 *b = &ray.b5502;
+    if (addr < 0xC0010) {
+        int reg = addr & 15;
+        *v = reg == 1 || reg == 9 ? 0x0C    /* status: transmitter ready, empty */
+           : reg == 12 ? b->ivr             /* interrupt vector */
+           : reg == 13 ? 0xFF               /* input port, pulled up */
+           : 0;                             /* no interrupts, nothing received */
+        return 1;
+    }
+    if (addr >= 0xD0000 && addr < 0xE0000) {
+        *v = b->sram[addr & 0x7FFF];
+        return 1;
+    }
+    if (addr >= 0xE0000) {
+        switch ((addr >> 1) & 3) {
+        case 0: *v = b->waddr; break;
+        case 1: *v = b->pal[b->raddr][b->rstep] & 0x3F;
+                if (++b->rstep == 3) { b->rstep = 0; b->raddr++; }
+                break;
+        case 2: *v = b->mask; break;
+        default: *v = b->raddr; break;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int b5502_write(uint32_t addr, uint8_t v)
+{
+    Board5502 *b = &ray.b5502;
+    if (addr < 0xC0010) {
+        if ((addr & 15) == 12)
+            b->ivr = v;
+        return 1;
+    }
+    if (addr >= 0xD0000 && addr < 0xE0000) {
+        b->sram[addr & 0x7FFF] = v;
+        return 1;
+    }
+    if (addr >= 0xE0000) {
+        switch ((addr >> 1) & 3) {
+        case 0: b->waddr = v; b->wstep = 0; break;
+        case 1: b->pal[b->waddr][b->wstep] = v & 0x3F;
+                if (++b->wstep == 3) { b->wstep = 0; b->waddr++; }
+                b->version++;
+                break;
+        case 2: b->mask = v; b->version++; break;
+        default: b->raddr = v; b->rstep = 0; break;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static uint8_t io_read8(uint32_t addr)
 {
+    if (ray.board == 5502 && addr >= 0xC0000 && addr < 0xE0008) {
+        uint8_t v;
+        if (b5502_read(addr, &v))
+            return v;
+    }
     if (addr >= 0xF6000 && addr < 0xF8000)
         return acrtc_read8(&ray.acrtc, addr & 3);
     if (addr >= 0xFB000 && addr < 0xFB020) {
@@ -168,6 +232,8 @@ static uint8_t io_read8(uint32_t addr)
 
 static void io_write8(uint32_t addr, uint8_t val)
 {
+    if (ray.board == 5502 && addr >= 0xC0000 && addr < 0xE0008 && b5502_write(addr, val))
+        return;
     if (addr >= 0xF6000 && addr < 0xF8000) {
         acrtc_write8(&ray.acrtc, addr & 3, val);
         return;
@@ -405,6 +471,9 @@ void ray_init(const uint8_t *rom, const uint8_t *nvram, double ay_clock, double 
     if (nvram)
         memcpy(ray.ram, nvram, RAM_SIZE);
     ray.acrtc.cpu_per_cycle = acrtc_clock > 0 ? CPU_HZ / acrtc_clock : 0.0;
+    ray.board = 5501;
+    ray.acrtc.addr_mask = VRAM_WORDS_5501 - 1;
+    ray.b5502.mask = 0xFF;
     acrtc_reset(&ray.acrtc);
     coin_reset(&ray.coin);
     for (int i = 0; i < 5; i++)
@@ -421,6 +490,31 @@ void ray_init(const uint8_t *rom, const uint8_t *nvram, double ay_clock, double 
     m68k_init();
     machine_reset();
     coin_power_on(&ray.coin);
+}
+
+int ray_set_board(int board)
+{
+    if (board != 5501 && board != 5502)
+        return -1;
+    ray.board = board;
+    ray.acrtc.addr_mask = (board == 5502 ? VRAM_WORDS : VRAM_WORDS_5501) - 1;
+    return 0;
+}
+
+void ray_palette(int bright, uint32_t pal[16])
+{
+    if (ray.board != 5502) {
+        video_palette_ex(acrtc_reg(&ray.acrtc, 0x06), bright, pal);
+        return;
+    }
+    /* G176 index: P0-P3 the pixel, P4/P5 pulled high, P6/P7 taken as 0 */
+    const Board5502 *b = &ray.b5502;
+    for (int i = 0; i < 16; i++) {
+        const uint8_t *c = b->pal[(0x30 | i) & b->mask];
+        uint32_t r = (c[0] << 2) | (c[0] >> 4), g = (c[1] << 2) | (c[1] >> 4),
+                 bl = (c[2] << 2) | (c[2] >> 4);
+        pal[i] = (r << 16) | (g << 8) | bl;
+    }
 }
 
 /* ------------------------------------------------------------ inputs */

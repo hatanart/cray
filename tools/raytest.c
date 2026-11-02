@@ -2,9 +2,9 @@
  * at given ticks, and write a screenshot (PPM), the RAM and the lamp log.
  *
  *   raytest [-r romdir] [-n nvram] [-t ticks] [-o out.ppm] [-m ram.bin]
- *           [-p TICK:BUTTON[:HOLD]]... [-c TICK] [-l]
+ *           [-p TICK:BUTTON[:HOLD]]... [-c TICK] [-l] [-b 5501|5502]
  * -n loads battery RAM but never writes it back. -c inserts a coin at TICK.
- * -l prints every lamp change. RAY_FIXED_TIME=<unix time> pins the clock.
+ * -l prints every lamp change. -b picks the video board. RAY_FIXED_TIME=<unix time> pins the clock.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,8 +39,9 @@ int main(int argc, char **argv)
     long coins[64];
     int ncoins = 0, lamplog = 0, trace = 0, firstrun = 0;
     double acrtc_clock = 3000000;
+    int board = 5501;
     int opt;
-    while ((opt = getopt(argc, argv, "r:R:n:t:o:m:p:c:la:i:TS:F")) != -1) {
+    while ((opt = getopt(argc, argv, "r:R:n:t:o:m:p:c:la:i:TS:Fb:")) != -1) {
         switch (opt) {
         case 'r': romdir = optarg; break;
         case 'R': rom = optarg; break;
@@ -49,6 +50,7 @@ int main(int argc, char **argv)
         case 'o': out = optarg; break;
         case 'm': ramout = optarg; break;
         case 'a': acrtc_clock = atof(optarg); break;
+        case 'b': board = atoi(optarg); break;
         case 'l': lamplog = 1; break;
         case 'i': idxout = optarg; break;
         case 'T': trace = 1; break;
@@ -87,6 +89,10 @@ int main(int argc, char **argv)
         fclose(f);
     }
     ray_init(romimg, have ? nv : NULL, 1000000, acrtc_clock);
+    if (ray_set_board(board)) {
+        fprintf(stderr, "board must be 5501 or 5502\n");
+        return 2;
+    }
     if (getenv("RAY_FIXED_TIME")) {
         fixed_time = atoll(getenv("RAY_FIXED_TIME"));
         ray_wallclock = fixed_clock;
@@ -153,7 +159,7 @@ int main(int argc, char **argv)
         static uint8_t img[SCREEN_W * SCREEN_H];
         uint32_t pal[16];
         video_render(&ray.acrtc, img);
-        video_palette(acrtc_reg(&ray.acrtc, 0x06), pal);
+        ray_palette(0, pal);
         FILE *f = fopen(out, "wb");
         fprintf(f, "P6\n%d %d\n255\n", SCREEN_W, SCREEN_H);
         for (int i = 0; i < SCREEN_W * SCREEN_H; i++) {

@@ -8,7 +8,7 @@
 #include <string.h>
 #include "ray.h"
 
-#define MASK (VRAM_WORDS - 1)
+#define MASK (a->addr_mask)
 
 static const uint8_t PALETTE[16][3] = {
     { 0x00, 0x00, 0x00 }, { 0x2D, 0x2D, 0x2D }, { 0xAA, 0x00, 0x00 }, { 0xFF, 0x00, 0x00 },

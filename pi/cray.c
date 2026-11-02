@@ -66,6 +66,7 @@ static struct {
     int kiosk;
     int custom50;
     int bright_attract;
+    int board;
     int realtime;
     char event_script[512];
     char sound_payout[1024], sound_coin_in[1024];
@@ -152,6 +153,7 @@ static void config_defaults(void)
     cfg.acrtc_clock = 3000000;
     cfg.custom50 = 1;
     cfg.bright_attract = 1;
+    cfg.board = 5501;
     cfg.sound_vary = 5;
     strcpy(cfg.event_script, "/etc/cray/event.sh");
     strcpy(cfg.sound_payout, "/usr/local/share/cray/payout_coin_01.wav /usr/local/share/cray/payout_coin_02.wav");
@@ -184,7 +186,7 @@ static int config_set(const char *k, const char *v)
 #define INT(name) if (!strcasecmp(k, #name)) { cfg.name = atoi(v); return 0; }
     STR(event_script) STR(scale) STR(rom) STR(romdir) STR(nvram) STR(connector) STR(mode) STR(audio) STR(gpiochip)
     INT(volume) INT(latency_ms) INT(lamp_active_low) INT(float_coins) INT(save_every) INT(auto_refill)
-    INT(acrtc_clock) INT(kiosk) INT(custom50) INT(bright_attract) INT(realtime) INT(scanlines)
+    INT(acrtc_clock) INT(kiosk) INT(custom50) INT(bright_attract) INT(board) INT(realtime) INT(scanlines)
 #undef STR
 #undef INT
     if (!strcasecmp(k, "features")) { cfg.features = strtoul(v, NULL, 16); return 0; }
@@ -738,7 +740,7 @@ static void publish_frame(void)
         pthread_cond_wait(&fr_cond, &fr_lock);
     pthread_mutex_unlock(&fr_lock);
     video_render(&ray.acrtc, fr_img[fr_write]);
-    video_palette_ex(acrtc_reg(&ray.acrtc, 0x06), cfg.bright_attract, fr_pal[fr_write]);
+    ray_palette(cfg.bright_attract, fr_pal[fr_write]);
     pthread_mutex_lock(&fr_lock);
     while (fr_ready >= 0 && !display_stop)
         pthread_cond_wait(&fr_cond, &fr_lock);
@@ -1323,6 +1325,7 @@ int main(int argc, char **argv)
     o.auto_refill = cfg.auto_refill;
     o.features = cfg.features;
     o.acrtc_clock = cfg.acrtc_clock;
+    o.board = cfg.board;
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);

@@ -143,6 +143,13 @@ TESTI 14 settings live in the battery RAM, so a save made with the old
 default (20002000) keeps the saver off: change it in TESTI 14 and
 restart, or delete the save (all three copies, see below).
 
+`board = 5502` in `cray.conf` runs the game on the later video board
+("Videomonitorin ohjain II": twice the video memory, an IMS G176 palette
+chip, a DUART and 32 KB more RAM). The ROMs detect it themselves, load
+their own palette and do the saver with it: first a little dimmer, then
+recoloured (blue turns gold, red magenta). The default is 5501, the
+board with 16 fixed colours.
+
 The game then starts at boot, runs as a service and restarts if it
 stops. Settings are in `/etc/cray/cray.conf`, and the ROMs and battery
 RAM are in `/var/lib/cray/roms`. To see its messages (display modes,

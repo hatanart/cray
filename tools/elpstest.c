@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     fclose(logf);
     snprintf(path, sizeof path, "%s.vram", prefix);
     FILE *f = fopen(path, "wb");
-    fwrite(ray.acrtc.vram, 2, VRAM_WORDS, f);
+    fwrite(ray.acrtc.vram, 2, ray.acrtc.addr_mask + 1, f);
     fclose(f);
     static uint8_t img[SCREEN_W * SCREEN_H];
     uint32_t pal[16];
