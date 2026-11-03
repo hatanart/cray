@@ -178,6 +178,11 @@ Setup also keeps the system log in RAM only (lost at a reboot), so
 logging never writes to the card. `journalctl -u cray` still shows the
 game's messages since the last start.
 
+It also turns off what a toy cabinet doesn't need: automatic updates
+(update by hand with `sudo apt update && sudo apt upgrade`), waiting
+for the network at boot, the daily man-db, dpkg and disk check jobs,
+and cloud-init (Raspberry Pi Imager's first-boot setup, done by then).
+
 **Read-only system.** Add `--readonly` to the setup options:
 
     sudo image/setup.sh --hdmi-1216 --audio jack --readonly
@@ -187,10 +192,21 @@ The system then runs from a read-only overlay (Raspberry Pi OS's own
 "overlay file system"): every write, including logs and anything you
 change, goes to RAM and is gone after a reboot. The only file written to
 the card is the battery RAM, kept on the boot partition
-(`/boot/cray/` or `/boot/firmware/cray/`). A power cut can lose at most
+(`/boot/firmware/cray/` on Bookworm and later, `/boot/cray/` before). A power cut can lose at most
 the last minute of bookkeeping.
 
-To change settings or update cray later, turn the overlay off first:
+**Settings on the boot partition.** cray also reads `cray/cray.conf` on
+the boot partition (`/boot/firmware/cray/cray.conf`, or `/boot/cray/`
+before Bookworm), after `/etc/cray/cray.conf`; its settings win. Setup
+puts a commented one there. The boot partition stays writable on a
+read-only system, and it's the FAT partition a Windows or Mac PC sees
+with the card in a reader, so `rom`, `scanlines`, `volume` and so on can
+be changed without turning the overlay off. Restart the game after a
+change (`sudo systemctl restart cray`, or reboot). Each ROM set keeps
+its own save in `cray/` there (`nvram` names that folder), so changing
+`rom` never mixes up the books.
+
+To update cray, or change what only `/etc` holds, turn the overlay off first:
 
     sudo raspi-config nonint do_overlayfs 1     # or: raspi-config > Performance > Overlay, off
     sudo reboot

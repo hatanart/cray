@@ -1291,7 +1291,8 @@ static void usage(void)
 {
     fprintf(stderr,
         "usage: cray [-c cray.conf] [setting=value ...]\n"
-        "  Reads /etc/cray/cray.conf, then ./cray.conf, then -c FILE, then settings\n"
+        "  Reads /etc/cray/cray.conf, then cray/cray.conf on the boot partition\n"
+        "  (/boot/firmware or /boot), then ./cray.conf, then -c FILE, then settings\n"
         "  given on the command line (e.g. mode=1280x720@50 kiosk=1).\n");
 }
 
@@ -1299,6 +1300,12 @@ int main(int argc, char **argv)
 {
     config_defaults();
     config_load("/etc/cray/cray.conf", 0);
+    /* the boot partition stays writable on a read-only system, and a PC can
+       edit it with the card in a reader: settings there override /etc */
+    if (access("/boot/firmware/cray/cray.conf", R_OK) == 0)
+        config_load("/boot/firmware/cray/cray.conf", 0);
+    else
+        config_load("/boot/cray/cray.conf", 0);
     config_load("cray.conf", 0);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-c") && i + 1 < argc) {

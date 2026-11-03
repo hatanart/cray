@@ -8,7 +8,7 @@
 typedef struct {
     const char *rom;            /* set name or file, NULL = default */
     const char *romdir;
-    const char *nvram;          /* NULL = next to the ROM set */
+    const char *nvram;          /* file, or a folder (set name.nvram there); NULL = next to the ROM set */
     int float_coins;            /* payout float on first start / refill (0 = off) */
     int save_every;             /* seconds between battery RAM saves (0 = only at exit) */
     int auto_refill;            /* refill the float when the game closes for lack of coins */

@@ -185,6 +185,42 @@ if systemctl list-unit-files rsyslog.service >/dev/null 2>&1; then
     systemctl disable --now rsyslog.service 2>/dev/null || true
 fi
 
+echo "== quiet system: no automatic updates, no waiting for the network"
+# A toy cabinet: updates in the background would use the CPU and the card
+# (and can't be kept on a read-only system); update by hand with apt.
+# Booting doesn't wait for a network, and cloud-init (the first-boot setup
+# of Raspberry Pi Imager) has done its job and isn't run again.
+for u in apt-daily.timer apt-daily-upgrade.timer man-db.timer dpkg-db-backup.timer \
+         e2scrub_all.timer e2scrub_reap.service fstrim.timer \
+         NetworkManager-wait-online.service systemd-networkd-wait-online.service; do
+    systemctl disable --now $u 2>/dev/null || true
+done
+systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+if [ -d /etc/cloud ]; then
+    touch /etc/cloud/cloud-init.disabled
+fi
+
+echo "== settings on the boot partition"
+# Read after /etc/cray/cray.conf: stays writable on a read-only system, and
+# a PC can edit it with the card in a reader.
+mkdir -p $BOOT/cray
+[ -f $BOOT/cray/cray.conf ] || cat > $BOOT/cray/cray.conf <<'EOF2'
+# Sound over HDMI (the TV's speakers) instead of the 3.5 mm jack, e.g. on
+# a Zero 2 W, which has no jack: remove the # from the next line.
+#audio = default:CARD=vc4hdmi
+
+# cray settings that override /etc/cray/cray.conf (all settings are
+# listed and explained there). Lines are "setting = value"; # starts a
+# comment. This file is on the boot partition, so it can be changed even
+# on a read-only system, or from a PC with the card in a reader. Restart
+# the game after a change: sudo systemctl restart cray, or reboot.
+#
+#rom = pokeri-7907-2.0          # or pokeri-8460-1.1
+#scanlines = 25                 # darker line under each game line, 0..100 %
+#volume = 100                   # 0..100
+#board = 5502                   # the later video board (colour palette chip)
+EOF2
+
 echo "== service"
 install -m 644 image/cray.service /etc/systemd/system/cray.service
 systemctl daemon-reload
@@ -194,9 +230,8 @@ if [ $READONLY = 1 ]; then
     echo "== read-only system"
     mkdir -p $BOOT/cray
     for f in /var/lib/cray/roms/*.nvram; do [ -f "$f" ] && cp -n "$f" $BOOT/cray/; done
-    SET=$(ls /var/lib/cray/roms/*.ray 2>/dev/null | head -1)
-    NAME=$(basename "${SET:-pokeri-8460-1.1.ray}" .ray)
-    set_conf nvram $BOOT/cray/$NAME.nvram
+    # a folder: each set keeps its own save there, so rom can be changed
+    set_conf nvram $BOOT/cray/
     raspi-config nonint do_overlayfs 0
     # raspi-config may also write-protect the boot partition, but the
     # battery RAM is saved there: keep it writable

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "session.h"
 
 static SessionOpts opts;
@@ -223,8 +224,25 @@ int session_open(const SessionOpts *o, void (*progress)(int))
         fprintf(stderr, "%s\n", err);
         return -1;
     }
-    if (o->nvram)
-        snprintf(nvram_path, sizeof nvram_path, "%s", o->nvram);
+    if (o->nvram) {
+        struct stat st;
+        size_t n = strlen(o->nvram);
+        if ((n && o->nvram[n - 1] == '/') || (stat(o->nvram, &st) == 0 && S_ISDIR(st.st_mode))) {
+            /* a folder: the save is named after the set, so changing rom
+               never loads another set's books */
+            const char *base = strrchr(nvram_path, '/');
+            base = base ? base + 1 : nvram_path;
+            char name[sizeof nvram_path];
+            snprintf(name, sizeof name, "%s", base);
+            if (snprintf(nvram_path, sizeof nvram_path, "%s%s%s", o->nvram,
+                         n && o->nvram[n - 1] == '/' ? "" : "/", name) >= (int)sizeof nvram_path) {
+                fprintf(stderr, "nvram path too long\n");
+                return -1;
+            }
+        } else {
+            snprintf(nvram_path, sizeof nvram_path, "%s", o->nvram);
+        }
+    }
     static uint8_t nv[RAM_SIZE];
     int have_nvram = load_nvram(nv);
     fprintf(stderr, "ROM:   %s\nNVRAM: %s%s\n", title, nvram_path, have_nvram ? "" : " (new)");
