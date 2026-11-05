@@ -1,5 +1,7 @@
 # cray: RAY video poker for the Raspberry Pi (C)
 
+![cray running POKERI 200 on a monitor](doc/cray.jpg)
+
 A C port of `pyray`, made for playing on a real cabinet:
 
 - The picture goes straight to HDMI or composite with no X, Wayland or

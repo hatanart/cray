@@ -137,7 +137,7 @@ static void config_defaults(void)
 {
     memset(&cfg, 0, sizeof cfg);
     strcpy(cfg.audio, "default");
-    cfg.volume = 50;
+    cfg.volume = 100;
     cfg.latency_ms = 40;
     strcpy(cfg.gpiochip, "auto");
     /* lamp bit -> GPIO (BCM numbers), see cray.conf */
