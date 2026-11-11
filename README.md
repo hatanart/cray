@@ -104,6 +104,12 @@ reboot; it undoes the previous choice. The build needs a few minutes on
 | `--audio hdmi` | over HDMI to the TV | Zero 2 W (no jack) |
 | `--audio pwm` | GPIO 18 / 19 as PWM, needs a filter | |
 
+With `--audio jack` or `pwm`, setup turns HDMI audio off
+(`dtoverlay=vc4-kms-v3d,noaudio` in `config.txt`): many cheap screens
+flicker or lose the picture when they get audio data they don't expect.
+To switch to HDMI sound later, remove `,noaudio` there and set
+`audio = default:CARD=vc4hdmi`.
+
 The game sound is mono and goes to both channels. The level is
 `volume = 0..100` in `cray.conf` (also `echo volume=70 | sudo tee
 /run/cray/control` while it runs).
@@ -167,14 +173,20 @@ failing and saves its battery RAM first.
 Switching the Pi off at the wall can still damage the SD card's file
 system, mostly while something is writing. cray writes only the 64 KB
 battery RAM file: 10 seconds after coins go in or out (at most once a
-minute), once an hour otherwise, and at exit. It writes a new file,
-flushes it to the card and renames it into place. Like the game's own
-books, which it keeps in three copies inside the RAM, cray keeps three
-generations of the file: `pokeri-8460-1.1.nvram` (newest), `.nvram.1`
-and `.nvram.2`, each ending in a checksum. At start it takes the newest
-one whose checksum is right and logs it if it had to fall back to an
-older one. The write runs in a background thread, so it never delays a
-frame. (pyray reads the same files: it ignores the checksum at the end.)
+minute), once an hour otherwise, and at exit. Each save is a new file
+with the next number, `pokeri-8460-1.1.000042.nvram`, ending in a
+checksum, and is flushed to the card before anything else happens.
+Nothing is renamed or overwritten, so a power cut can only spoil the
+file being written; the older ones stay as they were. (On the FAT boot
+partition of a read-only system that matters: FAT has no journal, and a
+rename over another file can leave every copy damaged.) After a save,
+cray deletes the older files, keeping the three newest good ones, like
+the game's own books, which it keeps in three copies inside the RAM. At
+start it takes the newest one whose checksum is right and logs any
+damaged one it skipped. Files from older versions (`name.nvram`,
+`.nvram.1`, `.nvram.2`) are read when there is no numbered one and
+deleted after the first new save. The write runs in a background
+thread, so it never delays a frame. (pyray reads these files too, given one by name: it ignores the checksum at the end.)
 
 Setup also keeps the system log in RAM only (lost at a reboot), so
 logging never writes to the card. `journalctl -u cray` still shows the
@@ -234,6 +246,10 @@ between. The cost is one extra frame (20 ms) of delay. Missed frames
 the time the game and the drawing took, and counted every 10 minutes
 and at exit. Game time still follows the display
 after a miss, so the sound doesn't drift.
+
+Setup also adds `drm_kms_helper.poll=0` to `cmdline.txt`: the screen's
+details are read once at start instead of every 10 seconds, which can
+make some screens blink.
 
 Progressive modes come first: one game line per screen line, no
 interlace flicker.

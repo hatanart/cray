@@ -119,24 +119,28 @@ for c in vc4.tv_norm=PAL video=Composite-1:720x576@50ie; do sed -i "1 s| $c||" $
 # KMS driver (the default on Bookworm); composite needs its parameter
 sed -i 's/^dtoverlay=vc4-kms-v3d.*/#&/' $CONFIG
 sed -i 's/^dtoverlay=vc4-fkms-v3d.*/#&/' $CONFIG
+# HDMI audio off unless the sound goes there: many cheap screens flicker
+# or lose the picture when they get audio data they don't expect
+KMS=vc4-kms-v3d
+[ $AUDIO = hdmi ] || KMS=$KMS,noaudio
 case $VIDEO in
     composite*)
-        echo "dtoverlay=vc4-kms-v3d,composite" >> $CONFIG
+        echo "dtoverlay=$KMS,composite" >> $CONFIG
         set_conf connector Composite-1
         if [ $VIDEO = composite ]; then set_conf mode 720x292@50; else set_conf mode 720x576i@50; fi
         ;;
     hdmi576p)
-        echo "dtoverlay=vc4-kms-v3d" >> $CONFIG
+        echo "dtoverlay=$KMS" >> $CONFIG
         set_conf connector HDMI-A-1
         set_conf mode 720x576@50
         ;;
     hdmi1216)
-        echo "dtoverlay=vc4-kms-v3d" >> $CONFIG
+        echo "dtoverlay=$KMS" >> $CONFIG
         set_conf connector HDMI-A-1
         set_conf mode 1216x576@50
         ;;
     *)
-        echo "dtoverlay=vc4-kms-v3d" >> $CONFIG
+        echo "dtoverlay=$KMS" >> $CONFIG
         ;;
 esac
 set_conf lamp5 18                 # the default pins (pwm moves them below)
@@ -164,6 +168,9 @@ add_cmd loglevel=3
 add_cmd logo.nologo
 add_cmd consoleblank=0
 add_cmd vt.global_cursor_default=0
+# the screen's details are read once at start, not again every 10 s
+# (a re-read can make some screens blink)
+add_cmd drm_kms_helper.poll=0
 if [ $VIDEO = composite ] || [ $VIDEO = composite576i ]; then
     # the boot console in 576i; cray switches to its own mode
     add_cmd vc4.tv_norm=PAL
@@ -206,7 +213,9 @@ echo "== settings on the boot partition"
 mkdir -p $BOOT/cray
 [ -f $BOOT/cray/cray.conf ] || cat > $BOOT/cray/cray.conf <<'EOF2'
 # Sound over HDMI (the TV's speakers) instead of the 3.5 mm jack, e.g. on
-# a Zero 2 W, which has no jack: remove the # from the next line.
+# a Zero 2 W, which has no jack: remove the # from the next line, and in
+# config.txt (next to this folder) change "dtoverlay=vc4-kms-v3d,noaudio"
+# to "dtoverlay=vc4-kms-v3d".
 #audio = default:CARD=vc4hdmi
 
 # cray settings that override /etc/cray/cray.conf (all settings are

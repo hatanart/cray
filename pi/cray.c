@@ -784,6 +784,23 @@ static int dev_open(const char *path)
     return 0;
 }
 
+/* Opening an input device can take 10-30 ms (a USB keyboard's extra
+ * parts, HDMI CEC), and the scan runs in the game loop: reopening the
+ * devices that have no game keys every 2 s starved the sound card.
+ * Scan only when /dev/input changes, i.e. something was plugged in. */
+static struct timespec input_mtime;
+
+static int input_changed(void)
+{
+    struct stat st;
+    if (stat("/dev/input", &st) != 0)
+        return 0;
+    if (st.st_mtim.tv_sec == input_mtime.tv_sec && st.st_mtim.tv_nsec == input_mtime.tv_nsec)
+        return 0;
+    input_mtime = st.st_mtim;
+    return 1;
+}
+
 static void input_scan(void)
 {
     DIR *d = opendir("/dev/input");
@@ -1348,6 +1365,7 @@ int main(int argc, char **argv)
         load_set(cfg.sound_coin_in, &clip_coin_in);
     }
     lamps_open();
+    input_changed();
     input_scan();
     control_open();
     if (session_open(&o, progress)) { display_close(); return 1; }
@@ -1407,7 +1425,8 @@ int main(int argc, char **argv)
             last_report = now_s();
         }
         if (now_s() - last_scan > 2.0) {             /* keyboards plugged in later */
-            input_scan();
+            if (input_changed())
+                input_scan();
             last_scan = now_s();
         }
     }

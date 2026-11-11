@@ -1,3 +1,4 @@
+#define _GNU_SOURCE                     /* syncfs */
 #include <errno.h>
 #include <pthread.h>
 #include <fcntl.h>
@@ -6,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "session.h"
 
 static SessionOpts opts;
@@ -34,13 +36,24 @@ void session_defaults(SessionOpts *o)
 
 const char *session_title(void) { return title; }
 
-/* Battery RAM files. Three generations are kept: name.nvram (newest),
- * name.nvram.1 and name.nvram.2. Each is the 64 KB RAM followed by a
- * trailer "CRAY" + CRC-32 (pyray reads only the first 64 KB). At start the
- * newest file whose CRC is right is used; a file without the trailer
- * (made by pyray or an older cray) is taken as it is. */
-#define NV_GENERATIONS 3
+/* Battery RAM files. Every save is a new file with the next number,
+ * e.g. pokeri-7907-2.0.000042.nvram: the 64 KB RAM followed by a trailer
+ * "CRAY" + CRC-32 (pyray reads only the first 64 KB). Nothing is renamed
+ * or overwritten, so a power cut can only spoil the file being written;
+ * the older ones stay as they were. That matters on FAT (the boot
+ * partition of a read-only system), which has no journal: there a rename
+ * over another file can leave every copy damaged. After a save, older
+ * files are deleted, keeping the three newest good ones. At start the
+ * newest good file is used; the files of older versions (name.nvram,
+ * .nvram.1, .nvram.2, or a pyray file without a trailer) are read when
+ * there is no numbered one, and deleted after the first new save. */
+#define NV_KEEP 3
 #define NV_TRAILER 8
+#define NV_MAX_FILES 256
+
+static char nv_dir[1400], nv_stem[1400];   /* folder, set name without .nvram */
+static unsigned nv_seq;                     /* highest number on the card */
+static char nv_used[2900];                  /* the file loaded at start */
 
 static uint32_t crc32(const uint8_t *p, size_t n)
 {
@@ -53,12 +66,56 @@ static uint32_t crc32(const uint8_t *p, size_t n)
     return ~c;
 }
 
-static void nv_name(char *out, size_t n, int gen)
+static void nv_split(void)
 {
-    if (gen)
-        snprintf(out, n, "%s.%d", nvram_path, gen);
-    else
-        snprintf(out, n, "%s", nvram_path);
+    snprintf(nv_dir, sizeof nv_dir, "%s", nvram_path);
+    char *slash = strrchr(nv_dir, '/');
+    const char *file;
+    if (slash) {
+        *slash = 0;
+        if (!nv_dir[0]) strcpy(nv_dir, "/");
+        file = nvram_path + (slash - nv_dir) + 1;
+    } else {
+        strcpy(nv_dir, ".");
+        file = nvram_path;
+    }
+    snprintf(nv_stem, sizeof nv_stem, "%s", file);
+    size_t n = strlen(nv_stem);
+    if (n > 6 && !strcmp(nv_stem + n - 6, ".nvram"))
+        nv_stem[n - 6] = 0;
+}
+
+static void nv_numbered(char *out, size_t n, unsigned seq)
+{
+    snprintf(out, n, "%s/%s.%06u.nvram", nv_dir, nv_stem, seq);
+}
+
+/* the save numbers in the folder, newest first; returns how many */
+static int nv_list(unsigned *seqs)
+{
+    int count = 0;
+    DIR *d = opendir(nv_dir);
+    if (!d)
+        return 0;
+    size_t sl = strlen(nv_stem);
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        const char *s = e->d_name;
+        if (strncmp(s, nv_stem, sl) || s[sl] != '.')
+            continue;
+        const char *num = s + sl + 1, *end = num;
+        while (*end >= '0' && *end <= '9') end++;
+        if (end == num || end - num > 9 || strcmp(end, ".nvram"))
+            continue;
+        if (count < NV_MAX_FILES)
+            seqs[count++] = (unsigned)strtoul(num, NULL, 10);
+    }
+    closedir(d);
+    for (int i = 1; i < count; i++)             /* newest first */
+        for (int j = i; j > 0 && seqs[j] > seqs[j - 1]; j--) {
+            unsigned t = seqs[j]; seqs[j] = seqs[j - 1]; seqs[j - 1] = t;
+        }
+    return count;
 }
 
 /* 1 = good (ram filled), 0 = missing, -1 = damaged */
@@ -84,40 +141,56 @@ static int read_nv_file(const char *path, uint8_t *ram)
     return 1;
 }
 
-/* the newest good generation; returns 1 if one was found */
+/* the old names: name.nvram, .nvram.1, .nvram.2 */
+static void nv_legacy(char *out, size_t n, int gen)
+{
+    if (gen) snprintf(out, n, "%s.%d", nvram_path, gen);
+    else snprintf(out, n, "%s", nvram_path);
+}
+
+/* the newest good save; returns 1 if one was found */
 static int load_nvram(uint8_t *ram)
 {
-    char path[1500];
-    for (int g = 0; g < NV_GENERATIONS; g++) {
-        nv_name(path, sizeof path, g);
+    static unsigned seqs[NV_MAX_FILES];
+    char path[2900];
+    nv_split();
+    int count = nv_list(seqs);
+    nv_seq = count ? seqs[0] : 0;
+    for (int i = 0; i < count; i++) {
+        nv_numbered(path, sizeof path, seqs[i]);
         int r = read_nv_file(path, ram);
         if (r > 0) {
-            if (g)
-                fprintf(stderr, "NVRAM: using the older copy %s\n", path);
+            snprintf(nv_used, sizeof nv_used, "%s", path);
             return 1;
         }
         if (r < 0)
-            fprintf(stderr, "NVRAM: %s is damaged, trying an older copy\n", path);
+            fprintf(stderr, "NVRAM: %s is damaged, trying an older one\n", path);
+    }
+    for (int g = 0; g < 3; g++) {
+        nv_legacy(path, sizeof path, g);
+        int r = read_nv_file(path, ram);
+        if (r > 0) {
+            snprintf(nv_used, sizeof nv_used, "%s", path);
+            return 1;
+        }
+        if (r < 0)
+            fprintf(stderr, "NVRAM: %s is damaged, trying an older one\n", path);
     }
     return 0;
 }
 
 static void sync_dir(void)
 {
-    char dir[1400];
-    snprintf(dir, sizeof dir, "%s", nvram_path);
-    char *slash = strrchr(dir, '/');
-    if (slash) *slash = 0; else strcpy(dir, ".");
-    int dfd = open(dir, O_RDONLY);
+    int dfd = open(nv_dir, O_RDONLY);
     if (dfd >= 0) {
         fsync(dfd);
         close(dfd);
     }
 }
 
-/* Write to a temporary file and flush it to the card, move the older
- * generations down one step, then rename the new file into place. A power
- * cut at any point leaves at least one good generation. */
+/* Write the next numbered file and flush it to the card, then delete what
+ * is no longer needed: older files beyond the three newest good ones,
+ * damaged ones and the old names. */
 static int write_nvram(const uint8_t *ram)
 {
     static uint8_t buf[RAM_SIZE + NV_TRAILER];
@@ -129,32 +202,50 @@ static int write_nvram(const uint8_t *ram)
     buf[RAM_SIZE + 6] = c >> 8;
     buf[RAM_SIZE + 7] = c;
 
-    char tmp[1500];
-    snprintf(tmp, sizeof tmp, "%s.tmp", nvram_path);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    char path[2900];
+    unsigned seq = nv_seq + 1;
+    nv_numbered(path, sizeof path, seq);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
-        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
+        fprintf(stderr, "cannot write %s: %s\n", path, strerror(errno));
         return -1;
     }
     ssize_t n = write(fd, buf, sizeof buf);
     if (n != (ssize_t)sizeof buf || fsync(fd) != 0) {
-        fprintf(stderr, "cannot write %s: %s\n", tmp, strerror(errno));
+        fprintf(stderr, "cannot write %s: %s\n", path, strerror(errno));
         close(fd);
-        unlink(tmp);
+        unlink(path);
         return -1;
     }
     close(fd);
-    char from[1500], to[1500];
-    for (int g = NV_GENERATIONS - 1; g > 0; g--) {
-        nv_name(from, sizeof from, g - 1);
-        nv_name(to, sizeof to, g);
-        rename(from, to);                       /* missing on the first saves: fine */
+    sync_dir();                                 /* the new name, on ext4 */
+    nv_seq = seq;
+
+    /* the new file is on the card: tidy up */
+    static unsigned seqs[NV_MAX_FILES];
+    static uint8_t check[RAM_SIZE];
+    int count = nv_list(seqs), kept = 0;
+    for (int i = 0; i < count; i++) {
+        nv_numbered(path, sizeof path, seqs[i]);
+        if (seqs[i] == seq || (seqs[i] < seq && kept < NV_KEEP && read_nv_file(path, check) > 0))
+            kept++;
+        else if (seqs[i] < seq)
+            unlink(path);
     }
-    if (rename(tmp, nvram_path) != 0) {
-        fprintf(stderr, "cannot rename %s: %s\n", tmp, strerror(errno));
-        return -1;
+    for (int g = 0; g < 3; g++) {
+        nv_legacy(path, sizeof path, g);
+        unlink(path);
     }
-    sync_dir();                                 /* make the renames durable */
+    snprintf(path, sizeof path, "%s.tmp", nvram_path);
+    unlink(path);
+    /* the deletions too, so a later file can't reuse their space while
+     * the card still lists them */
+    int dfd = open(nv_dir, O_RDONLY);
+    if (dfd >= 0) {
+        if (syncfs(dfd) != 0)
+            fsync(dfd);
+        close(dfd);
+    }
     return 0;
 }
 
@@ -245,7 +336,10 @@ int session_open(const SessionOpts *o, void (*progress)(int))
     }
     static uint8_t nv[RAM_SIZE];
     int have_nvram = load_nvram(nv);
-    fprintf(stderr, "ROM:   %s\nNVRAM: %s%s\n", title, nvram_path, have_nvram ? "" : " (new)");
+    if (have_nvram)
+        fprintf(stderr, "ROM:   %s\nNVRAM: %s\n", title, nv_used);
+    else
+        fprintf(stderr, "ROM:   %s\nNVRAM: %s/%s.*.nvram (new)\n", title, nv_dir, nv_stem);
     ray_init(rom, have_nvram ? nv : NULL, o->ay_clock, o->acrtc_clock);
     if (ray_set_board(o->board)) {
         fprintf(stderr, "board %d: must be 5501 or 5502\n", o->board);
